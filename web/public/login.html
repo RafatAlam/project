@@ -1,0 +1,77 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Login</title>
+
+  <!-- If you create styles.css, this will use it.
+       If not, the inline styles below still work. -->
+  <link rel="stylesheet" href="styles.css">
+
+  <style>
+    /* keep this as fallback in case styles.css doesn't exist yet */
+    body {
+      font-family: system-ui, Arial;
+      margin: 40px auto;
+      max-width: 420px;
+    }
+    form {
+      display: grid;
+      gap: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Login</h1>
+
+  <form id="f">
+    <label>
+      Username
+      <input id="u" required>
+    </label>
+
+    <label>
+      Password
+      <input id="p" type="password" required>
+    </label>
+
+    <button>Login</button>
+    <p id="msg"></p>
+  </form>
+
+  <p>No account? <a href="signup.html">Sign up</a></p>
+
+  <script>
+    const form = document.getElementById("f");
+    const msg  = document.getElementById("msg");
+    const u    = document.getElementById("u");
+    const p    = document.getElementById("p");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const r = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: u.value.trim(),
+          password: p.value
+        })
+      });
+
+      const data = await r.json();
+
+      if (!r.ok) {
+        msg.textContent = data.message || "error";
+        return;
+      }
+
+   //old; location.href = "home.html"
+
+      // new: go to the main hub page after login
+      location.href = "main.html";
+    });
+  </script>
+</body>
+</html>

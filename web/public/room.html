@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Room • Power Chess</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .room-code {
+      font-size: 1.4rem;
+      font-weight: bold;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+    }
+    .status-text {
+      margin-top: 0.5rem;
+      font-size: 0.9rem;
+      opacity: 0.85;
+    }
+    .btn-row {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 1.5rem;
+      flex-wrap: wrap;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Game Room</h1>
+
+    <div class="card">
+      <p>Your room code:</p>
+      <p class="room-code" id="room-code">—</p>
+      <p class="status-text" id="room-status">
+        Joining room…
+      </p>
+
+      <div class="btn-row">
+        <button id="start-btn" class="btn" disabled>Start Game</button>
+        <button id="copy-btn" class="btn-ghost" type="button">Copy Code</button>
+        <a href="main.html"><button class="btn-ghost" type="button">Back to Main</button></a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const roomCode = params.get("room");
+
+    const roomCodeEl   = document.getElementById("room-code");
+    const roomStatusEl = document.getElementById("room-status");
+    const startBtn     = document.getElementById("start-btn");
+    const copyBtn      = document.getElementById("copy-btn");
+
+    if (!roomCode) {
+      roomCodeEl.textContent = "N/A";
+      roomStatusEl.textContent = "No room code in URL. Go back and create or join a room from the main page.";
+      startBtn.disabled = true;
+    } else {
+      roomCodeEl.textContent = roomCode;
+      joinRoom(roomCode);
+    }
+
+    async function joinRoom(code) {
+      try {
+        const res = await fetch(
+          `/api/room/${encodeURIComponent(code)}/join`,
+          { method: "POST", credentials: "include" }
+        );
+
+        if (!res.ok) {
+          if (res.status === 401) {
+            roomStatusEl.textContent = "You are not logged in. Redirecting to login…";
+            setTimeout(() => location.href = "login.html", 1200);
+            return;
+          }
+          if (res.status === 404) {
+            roomStatusEl.textContent = "Room not found. Please check the code or create a new room.";
+            startBtn.disabled = true;
+            return;
+          }
+          if (res.status === 409) {
+            roomStatusEl.textContent = "Room is full. You can’t join this game.";
+            startBtn.disabled = true;
+            return;
+          }
+          roomStatusEl.textContent = "Error joining room.";
+          startBtn.disabled = true;
+          return;
+        }
+
+        // joined or already in room
+        roomStatusEl.textContent = "Waiting for both players. When ready, click Start Game.";
+        startBtn.disabled = false;
+      } catch (err) {
+        console.error("joinRoom error:", err);
+        roomStatusEl.textContent = "Network error joining room.";
+        startBtn.disabled = true;
+      }
+    }
+
+    startBtn.addEventListener("click", () => {
+      if (!roomCode) return;
+      // Go to the actual game page with this room code
+      location.href = `game.html?room=${encodeURIComponent(roomCode)}`;
+    });
+
+    copyBtn.addEventListener("click", async () => {
+      if (!roomCode) return;
+      try {
+        await navigator.clipboard.writeText(roomCode);
+        roomStatusEl.textContent = "Room code copied to clipboard.";
+      } catch (e) {
+        roomStatusEl.textContent = "Couldn’t copy code, please copy it manually.";
+      }
+    });
+  </script>
+</body>
+</html>

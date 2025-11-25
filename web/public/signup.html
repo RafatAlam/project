@@ -1,0 +1,25 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign up</title>
+<style>body{font-family:system-ui,Arial;margin:40px auto;max-width:420px}form{display:grid;gap:10px}</style>
+<h1>Create Account</h1>
+<form id="f">
+  <label>Username <input id="u" required></label>
+  <label>Password <input id="p" type="password" required></label>
+  <label>Avatar URL (optional) <input id="a"></label>
+  <button>Sign up</button><p id="msg"></p>
+</form>
+<p>Have an account? <a href="login.html">Login</a></p>
+<script>
+  f.addEventListener("submit", async (e)=>{
+    e.preventDefault();
+    const r = await fetch("/api/signup",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({username:u.value.trim(),password:p.value,avatar:a.value.trim()})
+    });
+    const data = await r.json();
+    if(!r.ok){ msg.textContent=data.message||"error"; return; }
+    msg.textContent="Account created. Redirecting…";
+    setTimeout(()=>location.href="login.html",800);
+  });
+</script>

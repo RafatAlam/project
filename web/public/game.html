@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Game • Power Chess</title>
+  <style>
+    html,body{
+      margin:0;
+      height:100%;
+      background:#202124;
+      color:#e8eaed;
+      font-family:system-ui,Segoe UI,Arial,sans-serif;
+    }
+    .wrap{
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      height:100%;
+      flex-direction:column;
+      gap:10px;
+    }
+    canvas{
+      background:#333;
+      border:8px solid #111;
+      box-shadow:0 10px 40px rgba(0,0,0,.35);
+      border-radius:6px;
+      cursor:pointer;
+    }
+    .hud-row{
+      display:flex;
+      justify-content:space-between;
+      width:768px;
+      max-width:100%;
+      box-sizing:border-box;
+      padding:0 4px;
+      font-size:14px;
+      opacity:.9;
+    }
+    a.button-link{
+      color:#8ab4f8;
+      text-decoration:none;
+      font-size:13px;
+    }
+    button#refresh-btn{
+      font-size:12px;
+      padding:3px 8px;
+      border-radius:4px;
+      border:1px solid #555;
+      background:#303134;
+      color:#e8eaed;
+      cursor:pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hud-row">
+      <div>Room: <span id="room-label">—</span></div>
+      <div>
+        <span id="turn-label">Turn: —</span>
+        &nbsp;•&nbsp;
+        <span id="state-label">State: —</span>
+      </div>
+      <div>
+        <a href="main.html" class="button-link">Exit to Main</a>
+      </div>
+    </div>
+
+    <canvas id="board" width="768" height="768"></canvas>
+
+    <div class="hud-row">
+      <div id="status-left">
+        Click a piece, then click a <b>green</b> square to move. Click same square to cancel.
+      </div>
+      <div style="text-align:right;">
+        <button id="refresh-btn">Refresh Board</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ------------ room code from URL ------------
+    const params = new URLSearchParams(location.search);
+    const roomCode = params.get("room");
+
+    const roomLabel  = document.getElementById("room-label");
+    const turnLabel  = document.getElementById("turn-label");
+    const stateLabel = document.getElementById("state-label");
+    const statusLeft = document.getElementById("status-left");
+    const refreshBtn = document.getElementById("refresh-btn");
+
+    if (!roomCode) {
+      alert("No room code provided in URL.");
+    } else {
+      roomLabel.textContent = roomCode;
+    }
+
+    const baseUrl = roomCode
+      ? `/api/room/${encodeURIComponent(roomCode)}`
+      : "";
+
+    // ------------ board + drawing (copied from web_gui.cpp style) ------------
+    const N=8, TILE=96;
+    const light='#f0d9b5', dark='#b58863';
+
+    const cvs=document.getElementById('board');
+    const ctx=cvs.getContext('2d');
+
+    let pieces=[];           // {r,c,type,color,hidden}
+    let legal=[];            // [{r,c}]
+    let selected=null;       // {sr,sc,type,color,hidden}
+    let hoverSq=null;
+    let currentTurn='WHITE';
+    let currentState='INPROGRESS';
+
+    // Unicode chess symbols per color/type
+    const glyph = {
+      WHITE: {
+        KING:'\u2654', QUEEN:'\u2655', ROOK:'\u2656',
+        BISHOP:'\u2657', KNIGHT:'\u2658', PAWN:'\u2659'
+      },
+      BLACK: {
+        KING:'\u265A', QUEEN:'\u265B', ROOK:'\u265C',
+        BISHOP:'\u265D', KNIGHT:'\u265E', PAWN:'\u265F'
+      }
+    };
+
+    const setStatus=t=>{ statusLeft.textContent=t||'\u00A0'; };
+
+    function updateTurnHud(){
+      const nice = (currentTurn === 'WHITE') ? 'White' : 'Black';
+      turnLabel.textContent  = `Turn: ${nice}`;
+      stateLabel.textContent = `State: ${currentState}`;
+    }
+
+    function drawBoard(){
+      for(let r=0;r<N;r++){
+        for(let c=0;c<N;c++){
+          ctx.fillStyle=((r+c)&1)?dark:light;
+          const x=c*TILE, y=r*TILE;     // row 0 at TOP, same as web_gui
+          ctx.fillRect(x,y,TILE,TILE);
+        }
+      }
+    }
+
+    function centerOf(r,c){
+      return {x:c*TILE+TILE/2,y:r*TILE+TILE/2};
+    }
+
+    function pixelToSquare(px,py){
+      const c=Math.floor(px/TILE), r=Math.floor(py/TILE);
+      if(r<0||r>=8||c<0||c>=8) return null;
+      return {r,c};
+    }
+
+    // filled = true -> filled text + outline
+    // filled = false -> outline only (no fill)
+    function drawGlyph(x,y,ch,color,alpha=1,filled=true){
+      ctx.save();
+      ctx.globalAlpha=alpha;
+
+      ctx.fillStyle=(color==='WHITE')?'#fff':'#111';
+      ctx.strokeStyle=(color==='WHITE')?'#222':'#eee';
+
+      ctx.lineWidth=3;
+      ctx.font='bold 56px system-ui,Segoe UI,Arial';
+      ctx.textAlign='center';
+      ctx.textBaseline='middle';
+      if (filled) {
+        ctx.fillText(ch,x,y);
+      }
+      ctx.strokeText(ch,x,y);
+      ctx.restore();
+    }
+
+    // Backend -> visual color: swap WHITE/BLACK, just like web_gui
+    function visualColor(p){
+      return (p.color === 'WHITE') ? 'BLACK' : 'WHITE';
+    }
+
+    function pieceCharFor(color,type){
+      const table = glyph[color] || glyph.WHITE;
+      return table[type] || '?';
+    }
+
+    function strokeSquare(r,c,style='rgba(50,200,90,0.95)',lw=4){
+      const x=c*TILE, y=r*TILE;
+      ctx.strokeStyle=style;
+      ctx.lineWidth=lw;
+      ctx.strokeRect(x+3,y+3,TILE-6,TILE-6);
+    }
+
+    function fillDot(r,c,color='rgba(50,200,90,0.7)'){
+      const x=c*TILE+TILE/2, y=r*TILE+TILE/2;
+      ctx.fillStyle=color;
+      ctx.beginPath();
+      ctx.arc(x,y,10,0,Math.PI*2);
+      ctx.fill();
+    }
+
+    function drawPiece(p){
+      const ctr = centerOf(p.r,p.c);
+      const vPieceColor   = visualColor(p);                      // visual color for the actual piece
+      const vQuestionColor = (vPieceColor === 'WHITE')
+                             ? 'BLACK'
+                             : 'WHITE';
+
+      if(p.hidden && p.type !== 'KING'){
+        // Hidden non-king pieces: question marks with swapped color
+        drawGlyph(ctr.x, ctr.y, '?', vQuestionColor, 1, true);
+      }else{
+        // Real pieces: outline-only, in vPieceColor
+        const ch = pieceCharFor(vPieceColor, p.type);
+        drawGlyph(ctr.x, ctr.y, ch, vPieceColor, 1, false);
+      }
+    }
+
+    function redraw(){
+      drawBoard();
+      if(!selected && hoverSq){
+        strokeSquare(hoverSq.r,hoverSq.c,'rgba(255,255,255,0.5)',3);
+      }
+      for(const p of pieces){
+        drawPiece(p);
+      }
+      if(selected){
+        strokeSquare(selected.sr,selected.sc,'rgba(90,150,255,0.95)',4);
+      }
+      if(selected && legal.length){
+        for(const m of legal){
+          strokeSquare(m.r,m.c);
+          fillDot(m.r,m.c);
+        }
+      }
+    }
+
+    // ------------ API helpers (pointing at /api/room/:code/...) ------------
+    async function GET_json(url){
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) {
+        if (res.status === 401) {
+          alert("Session expired. Please log in again.");
+          location.href = "login.html";
+        }
+        throw new Error("Bad response " + res.status);
+      }
+      return res.json();
+    }
+
+    async function loadState(){
+      if (!baseUrl) return;
+      const data = await GET_json(`${baseUrl}/state`);
+      pieces       = data.pieces || [];
+      currentTurn  = data.turn   || "WHITE";
+      currentState = data.state  || "INPROGRESS";
+      updateTurnHud();
+      redraw();
+    }
+
+    async function loadMoves(sr,sc){
+      if (!baseUrl) return;
+      legal = await GET_json(`${baseUrl}/moves?sr=${sr}&sc=${sc}`);
+      redraw();
+    }
+
+    async function postMove(sr,sc,dr,dc){
+      if (!baseUrl) return { ok:false };
+      const res = await fetch(
+        `${baseUrl}/move?sr=${sr}&sc=${sc}&dr=${dr}&dc=${dc}`,
+        { method:"POST", credentials:"include" }
+      );
+      const j = await res.json();
+      setStatus(j.ok
+        ? `Moved: (${sr},${sc}) \u2192 (${dr},${dc})`
+        : (j.message || `Illegal: (${sr},${sc}) \u2192 (${dr},${dc})`)
+      );
+      return j;
+    }
+
+    // ------------ helpers for clicks ------------
+    function pieceAt(r,c){
+      return pieces.find(q=>q.r===r && q.c===c) || null;
+    }
+
+    function isLegalTarget(r,c){
+      return legal.some(m=>m.r===r && m.c===c);
+    }
+
+    // ------------ events ------------
+    cvs.addEventListener('mousemove', ev=>{
+      const bb=cvs.getBoundingClientRect();
+      hoverSq = pixelToSquare(ev.clientX-bb.left, ev.clientY-bb.top);
+      redraw();
+    });
+
+    cvs.addEventListener('click', async ev=>{
+      const bb=cvs.getBoundingClientRect();
+      const sq=pixelToSquare(ev.clientX-bb.left, ev.clientY-bb.top);
+      if(!sq) return;
+
+      if(!selected){
+        const p = pieceAt(sq.r, sq.c);
+        if(p){
+          selected={sr:p.r,sc:p.c,type:p.type,color:p.color,hidden:p.hidden};
+          setStatus(`Selected ${p.type} at (${p.r},${p.c})`);
+          try {
+            await loadMoves(p.r,p.c);
+          } catch(e) {
+            console.error("loadMoves error:", e);
+            setStatus("Error loading moves.");
+          }
+        }else{
+          setStatus('');
+          legal=[];
+          redraw();
+        }
+        return;
+      }
+
+      if(sq.r===selected.sr && sq.c===selected.sc){
+        selected=null;
+        legal=[];
+        setStatus('');
+        redraw();
+        return;
+      }
+
+      if(isLegalTarget(sq.r,sq.c)){
+        try{
+          const j = await postMove(selected.sr,selected.sc,sq.r,sq.c);
+          if (j.ok) {
+            await loadState();
+          }
+        }catch(e){
+          console.error("postMove error:", e);
+          setStatus("Move failed.");
+        }
+        selected=null;
+        legal=[];
+        redraw();
+        return;
+      }
+
+      const p2=pieceAt(sq.r,sq.c);
+      if(p2){
+        selected={sr:p2.r,sc:p2.c,type:p2.type,color:p2.color,hidden:p2.hidden};
+        setStatus(`Selected ${p2.type} at (${p2.r},${p2.c})`);
+        try {
+          await loadMoves(p2.r,p2.c);
+        } catch(e){
+          console.error("loadMoves error:", e);
+          setStatus("Error loading moves.");
+        }
+        return;
+      }
+
+      selected=null;
+      legal=[];
+      setStatus('');
+      redraw();
+    });
+
+    refreshBtn.addEventListener("click", async () => {
+      try {
+        await loadState();
+        setStatus("Board refreshed.");
+      } catch(e) {
+        console.error("refresh error:", e);
+        setStatus("Error refreshing board.");
+      }
+    });
+
+    // ------------ initial load + polling ------------
+    window.addEventListener('load', async () => {
+      drawBoard();
+      if (baseUrl) {
+        await loadState();
+        // simple polling so both clients stay in sync
+        setInterval(loadState, 1000);
+      }
+    });
+  </script>
+</body>
+</html>
